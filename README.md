@@ -7,6 +7,119 @@ Graph-based fraud detection (GFD) can be regarded as a challenging semi-supervis
 ## Implementation
 The relevant datasets developed in the paper are on [google drive](https://drive.google.com/drive/folders/1eqfWN0CIudj7e9KJvkmj5uzK-eWs_pSE?usp=sharing). Download and unzip all files in the `data` folder.
 
+This repository version uses the five DGL graph datasets under `data/all_data`:
+
+- `questions`
+- `reddit`
+- `tolokers`
+- `weibo`
+- `yelp`
+
+The training code uses split `0` from `train_masks`, `val_masks`, and `test_masks`. It also masks 99.5% of node feature entries with zeros before training. The missing-feature random seed is controlled by the same `--seed` argument used for training.
+
+## Environment
+
+The project is tested with Python 3.10 and the following core packages:
+
+```text
+torch==2.3.0
+dgl==2.2.1
+numpy
+scipy
+sympy
+scikit-learn
+```
+
+Example Conda setup:
+
+```bash
+conda create -n sec-gfd python=3.10
+conda activate sec-gfd
+pip install torch==2.3.0
+pip install dgl==2.2.1 numpy scipy sympy scikit-learn
+```
+
+For GPU training, install a CUDA-enabled DGL build that matches your CUDA and PyTorch versions. If DGL is CPU-only, run with `--device cpu`.
+
+## Data Preparation
+
+Place the dataset files in this structure:
+
+```text
+SEC-GFD/
+  data/
+    all_data/
+      questions
+      reddit
+      tolokers
+      weibo
+      yelp
+```
+
+Each file should be a DGL graph file containing node fields:
+
+```text
+feature
+label
+train_masks
+val_masks
+test_masks
+```
+
+## Running
+
+Run the default experiment:
+
+```bash
+python main.py
+```
+
+Run a specific dataset:
+
+```bash
+python main.py --dataset tolokers --epoch 100 --ntrials 1 --seed 0
+```
+
+Run on CPU:
+
+```bash
+python main.py --dataset tolokers --device cpu
+```
+
+Supported datasets:
+
+```text
+questions, reddit, tolokers, weibo, yelp
+```
+
+Important arguments:
+
+```text
+--dataset    Dataset name. Default: tolokers
+--data_path  Dataset directory. Default: data/all_data
+--epoch      Number of training epochs. Default: 100
+--hid_dim    Hidden dimension. Default: 64
+--order      Beta wavelet order. Default: 2
+--lemda      Weight of the NCE loss. Default: 0.2
+--device     cpu or cuda. Default: cuda
+--seed       Random seed for training and feature masking. Default: 0
+--ntrials    Number of repeated runs. Default: 1
+```
+
+The output metrics are:
+
+```text
+ROC-AUC
+PR-AUC
+Macro-F1
+Fraud-F1
+Fraud-Precision
+Fraud-Recall
+GMean
+```
+
+The current implementation keeps the original threshold-selection strategy based on the best test Macro-F1 over fixed thresholds.
+
 
 If you use this package and find it useful, please cite our paper using the following BibTeX:)
 
