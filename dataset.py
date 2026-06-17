@@ -1,71 +1,83 @@
-from dgl.data import FraudYelpDataset, FraudAmazonDataset, RedditDataset
-from dgl.data.utils import load_graphs, save_graphs
+from pathlib import Path
+
+from dgl.data.utils import load_graphs
 import dgl
-import numpy as np
 import torch
 from utils import *
-import random
+
+DATASET_CHOICES = ("questions", "reddit", "tolokers", "weibo", "yelp")
+SPLIT_ID = 0
+MISSING_RATIO = 0.995
+
+
+def get_dataset_path(name, data_path):
+    name = name.lower()
+    if name not in DATASET_CHOICES:
+        supported = ", ".join(DATASET_CHOICES)
+        raise ValueError(f"Unsupported dataset: {name}. Supported: {supported}")
+
+    path = Path(data_path) / name
+    if not path.exists():
+        raise FileNotFoundError(f"Dataset file not found: {path}")
+    return path
 
 
 class Dataset:
-    def __init__(self, name='tfinance', homo=True, del_ratio=0.005):
-        self.name = name
-        graph = None
-        if name == 'tfinance':
-            graph, label_dict = load_graphs('/data/tfinance')
-            graph = graph[0]
-            graph.ndata['label'] = graph.ndata['label'].argmax(1)
-            if del_ratio != 0:
-                graph = random_delete(graph, del_ratio)
-                graph = dgl.add_self_loop(graph)
+    def __init__(self, name="tolokers", data_path="data/all_data", del_ratio=0.005, seed=0):
+        self.name = name.lower()
 
+        graphs, _ = load_graphs(str(get_dataset_path(self.name, data_path)))
+        if len(graphs) != 1:
+            raise ValueError(f"Expected 1 graph for {self.name}, got {len(graphs)}")
+        graph = graphs[0]
 
-        elif name == 'tsocial':
-            graph, label_dict = load_graphs('/data/tsocial')
-            graph = graph[0]
-            if del_ratio != 0:
-                graph = random_delete(graph, del_ratio)
-                graph = dgl.add_self_loop(graph)
-            
-
-        elif name == 'yelp':
-            dataset = FraudYelpDataset()
-            graph = dataset[0]
-            if homo:
-                graph = dgl.to_homogeneous(dataset[0], ndata=['feature', 'label', 'train_mask', 'val_mask', 'test_mask'])
-                # graph = dgl.add_self_loop(graph)
-            if del_ratio != 0:
-                graph = random_delete(graph, del_ratio)
-            if homo:
-                graph = dgl.add_self_loop(graph)
-
-        elif name == 'amazon':
-            dataset = FraudAmazonDataset()
-            graph = dataset[0]
-            if homo:
-                graph = dgl.to_homogeneous(dataset[0], ndata=['feature', 'label', 'train_mask', 'val_mask', 'test_mask'])
-                # graph = dgl.add_self_loop(graph)
-            if del_ratio != 0:
-                graph = random_delete(graph, del_ratio)
-            if homo:
-                graph = dgl.add_self_loop(graph)
-        
-        elif name == 'reddit':
-            dataset = load_graphs('/data/reddit')
-            graph = dataset[0][0]
-            if del_ratio != 0:
-                graph = random_delete(graph, del_ratio)
-            graph = dgl.add_self_loop(graph)
-            
-        else:
-            print('no such dataset')
-            exit(1)
+        for key in ("feature", "label", "train_masks", "val_masks", "test_masks"):
+            if key not in graph.ndata:
+                raise KeyError(f"Missing required node field: graph.ndata['{key}']")
 
         graph.ndata['label'] = graph.ndata['label'].long().squeeze(-1)
         graph.ndata['feature'] = graph.ndata['feature'].float()
+        graph.ndata['feature'], missing_mask = mask_features_with_zero(
+            graph.ndata['feature'],
+            missing_ratio=MISSING_RATIO,
+            seed=seed,
+        )
+        graph.ndata['missing_mask'] = missing_mask
+        graph.ndata['train_mask'] = graph.ndata['train_masks'][:, SPLIT_ID].bool()
+        graph.ndata['val_mask'] = graph.ndata['val_masks'][:, SPLIT_ID].bool()
+        graph.ndata['test_mask'] = graph.ndata['test_masks'][:, SPLIT_ID].bool()
+
+        if del_ratio != 0:
+            graph = random_delete(graph, del_ratio)
+            graph = dgl.add_self_loop(graph)
+
         print(graph)
 
         self.graph = graph
+
+
+def mask_features_with_zero(features, missing_ratio, seed):
+    if not 0.0 <= missing_ratio <= 1.0:
+        raise ValueError(f"missing_ratio must be in [0, 1], got {missing_ratio}")
+    if features.ndim != 2:
+        raise ValueError(f"features must be 2D, got shape {tuple(features.shape)}")
+    if not torch.is_floating_point(features):
+        raise TypeError("features must be floating point")
+
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    missing_mask = torch.rand(
+        features.shape,
+        generator=generator,
+        device="cpu",
+    ) < missing_ratio
+    missing_mask = missing_mask.to(device=features.device)
+
+    masked_features = features.clone()
+    masked_features[missing_mask] = 0.0
+    actual_ratio = missing_mask.sum().item() / missing_mask.numel()
+    print('feature missing ratio: {:.3f}%'.format(actual_ratio * 100))
+    return masked_features, missing_mask
 
 
 def random_delete(graph, del_ratio):
